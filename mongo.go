@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,6 +35,75 @@ var (
 // Get obtiene el cliente
 func Get() *Mongo {
 	return session
+}
+
+// GetFiltersOptions separa los filtros y parametros desde la URL
+func GetFiltersOptions(r *http.Request, format map[string]string) (*Filter, error) {
+	keys := r.URL.Query()
+	filters := bson.M{}
+	parameters := &options.FindOptions{}
+
+	// Recorremos los parametros para separarlos
+	for key, value := range keys {
+		switch key {
+		case "sort":
+			sort := bson.M{}
+			ks := strings.Split(value[0], ",")
+			for _, tag := range ks {
+				v := 1
+				if tag[:1] == "-" {
+					tag = tag[1:]
+					v = -1
+				}
+				sort[tag] = v
+			}
+			parameters.Sort = sort
+		case "limit":
+			val, err := strconv.ParseInt(value[0], 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			parameters.Limit = &val
+		case "offset", "skip":
+			val, err := strconv.ParseInt(value[0], 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			parameters.Skip = &val
+		default:
+			if format == nil || format[key] == "" {
+				filters[key] = value[0]
+				continue
+			}
+			switch format[key] {
+			case "int":
+				val, err := strconv.Atoi(value[0])
+				if err != nil {
+					return nil, err
+				}
+				filters[key] = val
+			case "bool":
+				val, err := strconv.ParseBool(value[0])
+				if err != nil {
+					return nil, err
+				}
+				filters[key] = val
+			case "uint":
+				val, err := strconv.ParseUint(value[0], 10, 64)
+				if err != nil {
+					return nil, err
+				}
+				filters[key] = val
+			default:
+				filters[key] = value[0]
+			}
+		}
+	}
+
+	return &Filter{
+		Filter: filters,
+		GetAll: parameters,
+	}, nil
 }
 
 // Configure Configurar el cliente
