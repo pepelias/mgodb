@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mitchellh/mapstructure"
+
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 	"gopkg.in/mgo.v2/bson"
@@ -38,7 +40,7 @@ func Get() *Mongo {
 }
 
 // GetFiltersOptions separa los filtros y parametros desde la URL
-func GetFiltersOptions(r *http.Request, format map[string]string) (*Filter, error) {
+func GetFiltersAndOptions(r *http.Request, format map[string]string) (*Filter, error) {
 	keys := r.URL.Query()
 	filters := bson.M{}
 	parameters := &options.FindOptions{}
@@ -186,6 +188,35 @@ func (m *Mongo) Update(filter bson.M, update interface{}, collection string, dat
 	return err
 }
 
+// GetOneAndUpdate .
+func (m *Mongo) GetAndUpdate(filter bson.M, update interface{}, collection, database string) error {
+	coll := m.Client.Database(database).Collection(collection)
+
+	// Generamos un contexto específico para esta operación
+	ctx, cancel := newContext()
+	defer cancel()
+
+	prev := bson.M{}
+	res := coll.FindOneAndUpdate(ctx, filter, bson.M{"$set": update})
+	err := res.Decode(&prev)
+	if err != nil {
+		return err
+	}
+
+	// Mezclamos ambas versiones
+	err = mapstructure.Decode(update, &prev)
+	if err != nil {
+		return err
+	}
+
+	// Rellenamos el puntero
+	err = mapstructure.Decode(&prev, update)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // GetAll recupera los registros, el output debe ser un *[]X
 func (m *Mongo) GetAll(f *Filter, output interface{}, collection string, database string) error {
 	coll := m.Client.Database(database).Collection(collection)
@@ -214,5 +245,16 @@ func (m *Mongo) GetOne(filter bson.M, output interface{}, collection string, dat
 
 	// DDBB
 	err := coll.FindOne(ctx, filter).Decode(output)
+	return err
+}
+
+// Delete .
+func (m *Mongo) Delete(filter bson.M, collection, database string) error {
+	coll := m.Client.Database(database).Collection(collection)
+
+	ctx, cancel := newContext()
+	defer cancel()
+
+	_, err := coll.DeleteOne(ctx, filter)
 	return err
 }
