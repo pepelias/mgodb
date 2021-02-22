@@ -2,6 +2,8 @@ package mgodb
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -11,7 +13,6 @@ import (
 	"time"
 
 	"github.com/mitchellh/mapstructure"
-
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 	"gopkg.in/mgo.v2/bson"
@@ -32,6 +33,8 @@ type Filter struct {
 var (
 	session *Mongo
 	once    sync.Once
+	// ErrBadFormat request-format incorrecto
+	ErrBadFormat = errors.New("El parametro request-format debe ser un json de sólo strings")
 )
 
 // Get obtiene el cliente
@@ -39,11 +42,19 @@ func Get() *Mongo {
 	return session
 }
 
-// GetFiltersOptions separa los filtros y parametros desde la URL
+// GetFiltersAndOptions separa los filtros y parametros desde la URL
 func GetFiltersAndOptions(r *http.Request, format map[string]string) (*Filter, error) {
 	keys := r.URL.Query()
 	filters := bson.M{}
 	parameters := &options.FindOptions{}
+
+	if format == nil && keys["request-format"] != nil {
+		err := json.Unmarshal([]byte(keys["request-format"][0]), &format)
+		if err != nil {
+			return nil, ErrBadFormat
+		}
+		delete(keys, "request-format")
+	}
 
 	// Recorremos los parametros para separarlos
 	for key, value := range keys {
@@ -132,6 +143,8 @@ func newMongoClient(username, password, host, port, authDB string) (*Mongo, erro
 	if authDB != "" {
 		uri += authDB
 	}
+
+	// uri := fmt.Sprintf("mongodb+srv://%s:%s@%s/%s?retryWrites=true&w=majority", username, password, host, authDB)
 	client, err := mongo.NewClient(options.Client().ApplyURI(uri))
 
 	if err != nil {
@@ -188,7 +201,7 @@ func (m *Mongo) Update(filter bson.M, update interface{}, collection string, dat
 	return err
 }
 
-// GetOneAndUpdate .
+// GetAndUpdate .
 func (m *Mongo) GetAndUpdate(filter bson.M, update interface{}, collection, database string) error {
 	coll := m.Client.Database(database).Collection(collection)
 
@@ -196,24 +209,54 @@ func (m *Mongo) GetAndUpdate(filter bson.M, update interface{}, collection, data
 	ctx, cancel := newContext()
 	defer cancel()
 
+	// Recibe el documento anterior
 	prev := bson.M{}
-	res := coll.FindOneAndUpdate(ctx, filter, bson.M{"$set": update})
+
+	// Soporte a push (Sólo bson.M)
+	var bm bson.M
+	switch update.(type) {
+	case *bson.M:
+		bm = *update.(*bson.M)
+	case *map[string]interface{}:
+		bm = bson.M(*update.(*map[string]interface{}))
+	}
+
+	var res *mongo.SingleResult
+	if bm != nil {
+		set := bson.M{}
+		if bm["$push"] != nil {
+			set["$addToSet"] = bm["$push"]
+		}
+		if bm["$inc"] != nil {
+			set["$inc"] = bm["$inc"]
+		}
+		delete(bm, "$push")
+		delete(bm, "$inc")
+		if len(bm) > 0 {
+			set["$set"] = bm
+		}
+
+		res = coll.FindOneAndUpdate(ctx, filter, set)
+	} else {
+		res = coll.FindOneAndUpdate(ctx, filter, bson.M{"$set": update})
+	}
 	err := res.Decode(&prev)
 	if err != nil {
 		return err
 	}
 
-	// Mezclamos ambas versiones
+	// unificamos (prev está completo)
 	err = mapstructure.Decode(update, &prev)
 	if err != nil {
 		return err
 	}
 
-	// Rellenamos el puntero
-	err = mapstructure.Decode(&prev, update)
+	// Actualizamos update (No sabemos el type)
+	err = mapstructure.Decode(prev, update)
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -257,4 +300,14 @@ func (m *Mongo) Delete(filter bson.M, collection, database string) error {
 
 	_, err := coll.DeleteOne(ctx, filter)
 	return err
+}
+
+// Count ...
+func (m *Mongo) Count(filter bson.M, collection, database string) (int64, error) {
+	coll := m.Client.Database(database).Collection(collection)
+
+	ctx, cancel := newContext()
+	defer cancel()
+
+	return coll.CountDocuments(ctx, filter)
 }
