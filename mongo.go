@@ -120,10 +120,10 @@ func GetFiltersAndOptions(r *http.Request, format map[string]string) (*Filter, e
 }
 
 // Configure Configurar el cliente
-func Configure(username, password, host, port, authDB string) {
+func Configure(username, password, host, port, authDB string, remote ...bool) {
 	once.Do(func() {
 		var err error
-		sess, err := newMongoClient(username, password, host, port, authDB)
+		sess, err := newMongoClient(username, password, host, port, authDB, remote...)
 		if err != nil {
 			log.Println("Problema con mongo")
 			log.Fatal(err)
@@ -134,17 +134,21 @@ func Configure(username, password, host, port, authDB string) {
 }
 
 // newMongoClient Crea un cliente (se conecta a mongo)
-func newMongoClient(username, password, host, port, authDB string) (*Mongo, error) {
-	uri := "mongodb://"
-	if username != "" || password != "" {
-		uri += fmt.Sprintf("%s:%s@", username, password)
-	}
-	uri += fmt.Sprintf("%s:%s/", host, port)
-	if authDB != "" {
-		uri += authDB
+func newMongoClient(username, password, host, port, authDB string, remote ...bool) (*Mongo, error) {
+	var uri string
+	if len(remote) > 0 && remote[0] {
+		uri = fmt.Sprintf("mongodb+srv://%s:%s@%s/%s?retryWrites=true&w=majority", username, password, host, authDB)
+	} else {
+		uri = "mongodb://"
+		if username != "" || password != "" {
+			uri += fmt.Sprintf("%s:%s@", username, password)
+		}
+		uri += fmt.Sprintf("%s:%s/", host, port)
+		if authDB != "" {
+			uri += authDB
+		}
 	}
 
-	// uri := fmt.Sprintf("mongodb+srv://%s:%s@%s/%s?retryWrites=true&w=majority", username, password, host, authDB)
 	client, err := mongo.NewClient(options.Client().ApplyURI(uri))
 
 	if err != nil {
