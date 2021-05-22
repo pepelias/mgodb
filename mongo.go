@@ -148,7 +148,7 @@ func newMongoClient(username, password, host, port, authDB string, remote ...boo
 			uri += authDB
 		}
 	}
-
+	log.Println(uri)
 	client, err := mongo.NewClient(options.Client().ApplyURI(uri))
 
 	if err != nil {
@@ -314,4 +314,22 @@ func (m *Mongo) Count(filter bson.M, collection, database string) (int64, error)
 	defer cancel()
 
 	return coll.CountDocuments(ctx, filter)
+}
+
+// Count ...
+func (m *Mongo) CreateIndex(keys bson.M, unique bool, collection, database string) error {
+	coll := m.Client.Database(database).Collection(collection)
+
+	index := mongo.IndexModel{
+		Keys: keys,
+		Options: &options.IndexOptions{
+			Unique: &unique,
+		},
+	}
+
+	ctx, cancel := newContext()
+	defer cancel()
+
+	_, err := coll.Indexes().CreateOne(ctx, index)
+	return err
 }
