@@ -46,6 +46,13 @@ type RegisterUnix struct {
 	DeletedAt int64              `json:"deleted_at" bson:"deleted_at"`
 }
 
+type Lookup struct {
+	From         string `bson:"from"`
+	LocalField   string `bson:"localField"`
+	ForeignField string `bson:"foreignField"`
+	As           string `bson:"as"`
+}
+
 var (
 	session *Mongo
 	once    sync.Once
@@ -309,6 +316,35 @@ func (m *Mongo) GetOne(filter bson.M, output interface{}, collection string, dat
 
 	// DDBB
 	err := coll.FindOne(ctx, filter).Decode(output)
+	return err
+}
+
+// GetOne recupera un registro específico
+func (m *Mongo) GetJoined(filter bson.M, lookup Lookup, unwind bool, output interface{}, collection string, database string) error {
+	coll := m.Client.Database(database).Collection(collection)
+
+	// Generamos un contexto específico para esta operación
+	ctx, cancel := newContext()
+	defer cancel()
+
+	// DDBB
+	pipes := []bson.M{
+		{"$match": filter},
+		{"$lookup": lookup},
+	}
+	if unwind {
+		pipes = append(pipes, bson.M{"$unwind": "$" + lookup.As})
+	}
+
+	cursor, err := coll.Aggregate(ctx, pipes)
+	if err != nil {
+		log.Panicln("Fallo el aggregate")
+		return err
+	}
+	err = cursor.All(ctx, output)
+	if err != nil {
+		log.Println(cursor.Err())
+	}
 	return err
 }
 
