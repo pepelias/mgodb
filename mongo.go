@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kr/pretty"
 	"github.com/mitchellh/mapstructure"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
@@ -25,9 +26,24 @@ import (
 type Mongo struct {
 	Client *mongo.Client
 }
+
+// Default Structures
 type Filter struct {
 	Filter bson.M
 	GetAll *options.FindOptions
+}
+
+type Register struct {
+	ID        primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	CreatedAt time.Time          `json:"created_at" bson:"created_at"`
+	UpdatedAt time.Time          `json:"updated_at" bson:"updated_at"`
+	DeletedAt time.Time          `json:"deleted_at" bson:"deleted_at"`
+}
+type RegisterUnix struct {
+	ID        primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	CreatedAt int64              `json:"created_at" bson:"created_at"`
+	UpdatedAt int64              `json:"updated_at" bson:"updated_at"`
+	DeletedAt int64              `json:"deleted_at" bson:"deleted_at"`
 }
 
 var (
@@ -62,6 +78,7 @@ func GetFiltersAndOptions(r *http.Request, format map[string]string) (*Filter, e
 		case "sort":
 			sort := bson.M{}
 			ks := strings.Split(value[0], ",")
+			pretty.Println(ks)
 			for _, tag := range ks {
 				v := 1
 				if tag[:1] == "-" {
@@ -316,7 +333,7 @@ func (m *Mongo) Count(filter bson.M, collection, database string) (int64, error)
 	return coll.CountDocuments(ctx, filter)
 }
 
-// Count ...
+// CreateIndex ...
 func (m *Mongo) CreateIndex(keys bson.M, unique bool, collection, database string) error {
 	coll := m.Client.Database(database).Collection(collection)
 
